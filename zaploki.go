@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"net/http"
@@ -39,9 +40,10 @@ type Config struct {
 	// BatchMaxWait is the maximum time to wait before sending a request
 	BatchMaxWait time.Duration
 	// Labels that are added to all log lines
-	Labels   map[string]string
-	Username string
-	Password string
+	Labels           map[string]string
+	Username         string
+	Password         string
+	SkipGzipEncoding bool
 }
 
 type lokiPusher struct {
@@ -187,27 +189,33 @@ func newLog(entry logEntry) streamValue {
 
 func (lp *lokiPusher) send() error {
 	buf := bytes.NewBuffer([]byte{})
-	gz := gzip.NewWriter(buf)
+	var w io.Writer
+	if !lp.config.SkipGzipEncoding {
+		w = gzip.NewWriter(buf)
+	} else {
+		w = buf
+	}
 
-	if err := json.NewEncoder(gz).Encode(lokiPushRequest{Streams: []stream{{
+	if err := json.NewEncoder(w).Encode(lokiPushRequest{Streams: []stream{{
 		Stream: lp.config.Labels,
 		Values: lp.logsBatch,
 	}}}); err != nil {
 		return err
 	}
-
-	if err := gz.Close(); err != nil {
-		return err
+	if !lp.config.SkipGzipEncoding {
+		if err := w.(*gzip.Writer).Close(); err != nil {
+			return err
+		}
 	}
-
 	req, err := http.NewRequest(http.MethodPost, lp.config.Url, buf)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Content-Encoding", "gzip")
-
+	if !lp.config.SkipGzipEncoding {
+		req.Header.Set("Content-Encoding", "gzip")
+	}
 	if len(lp.config.TenantKey) > 0 {
 		req.Header.Set(lp.config.TenantKey, lp.config.TenantValue)
 	}
