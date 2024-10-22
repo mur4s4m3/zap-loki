@@ -1,4 +1,4 @@
-module github.com/paul-milne/zap-loki
+module github.com/mur4s4m3/zap-loki
 
 go 1.21
 
