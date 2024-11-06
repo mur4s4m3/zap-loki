@@ -44,13 +44,15 @@ type Config struct {
 	Username         string
 	Password         string
 	SkipGzipEncoding bool
+	DebugRequests    bool
+	HttpClient       *http.Client
 }
 
 type lokiPusher struct {
-	config    *Config
-	ctx       context.Context
-	cancel    context.CancelFunc
-	client    *http.Client
+	config *Config
+	ctx    context.Context
+	cancel context.CancelFunc
+	//client    *http.Client
 	quit      chan struct{}
 	entry     chan logEntry
 	waitGroup sync.WaitGroup
@@ -79,13 +81,16 @@ type logEntry struct {
 func New(ctx context.Context, cfg Config) ZapLoki {
 	cfg.Url = fmt.Sprintf("%s/loki/api/v1/push", strings.TrimSuffix(cfg.Url, "/"))
 
+	if cfg.HttpClient == nil {
+		cfg.HttpClient = &http.Client{Transport: http.DefaultTransport}
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	lp := &lokiPusher{
-		config:    &cfg,
-		ctx:       ctx,
-		cancel:    cancel,
-		client:    &http.Client{},
+		config: &cfg,
+		ctx:    ctx,
+		cancel: cancel,
+		//client:    &http.Client{},
 		quit:      make(chan struct{}),
 		entry:     make(chan logEntry),
 		logsBatch: make([]streamValue, 0, cfg.BatchMaxSize),
@@ -224,8 +229,15 @@ func (lp *lokiPusher) send() error {
 	if lp.config.Username != "" && lp.config.Password != "" {
 		req.SetBasicAuth(lp.config.Username, lp.config.Password)
 	}
+	if lp.config.DebugRequests {
+		fmt.Println("request url: ", req.URL)
+		fmt.Println("request header: ", req.Header)
+		fmt.Println("request body: ", req.Body)
 
-	resp, err := lp.client.Do(req)
+		fmt.Println("config url: ", lp.config.Url)
+		fmt.Printf("transport: %+v\n", lp.config.HttpClient.Transport)
+	}
+	resp, err := lp.config.HttpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
@@ -233,6 +245,13 @@ func (lp *lokiPusher) send() error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusNoContent {
+		if lp.config.DebugRequests {
+			// debug all client info and return error if not 204
+			fmt.Println("response status code: ", resp.StatusCode)
+			fmt.Println("response status: ", resp.Status)
+			fmt.Println("response header: ", resp.Header)
+			fmt.Println("response body: ", resp.Body)
+		}
 		return fmt.Errorf("recieved unexpected response code from Loki: %s", resp.Status)
 	}
 

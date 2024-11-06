@@ -42,13 +42,15 @@ func TestNew(t *testing.T) {
 		assert.Equal(t, expectedLabels, req.Streams[0].Stream, "Expected labels to match")
 	})
 	defer mockServer.Close()
-	v := New(context.Background(), Config{
+	zapLoki := New(context.Background(), Config{
+		DebugRequests: true,
+		//SkipGzipEncoding: true,
 		Url:          mockServer.URL,
 		BatchMaxSize: 100,
 		BatchMaxWait: 10 * time.Second,
 		Labels:       map[string]string{"app": "test", "env": "dev"},
 	})
-	logger, err := v.WithCreateLogger(zap.NewProductionConfig())
+	logger, err := zapLoki.WithCreateLogger(zap.NewProductionConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
